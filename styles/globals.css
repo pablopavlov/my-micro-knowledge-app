@@ -1,0 +1,25 @@
+/* styles/globals.css
+   Este archivo contiene estilos CSS globales que se aplican a toda la aplicación.
+   Es importado en pages/_app.js. */
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  /* Define una pila de fuentes para asegurar una buena legibilidad en diferentes sistemas operativos. */
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
+    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+}
+
+a {
+  color: inherit; /* Los enlaces heredan el color de texto del padre. */
+  text-decoration: none; /* Elimina el subrayado predeterminado de los enlaces. */
+}
+
+* {
+  /* box-sizing: border-box asegura que el padding y el border se incluyan en el ancho/alto total del elemento,
+     facilitando el diseño responsivo. */
+  box-sizing: border-box;
+}
+
+
