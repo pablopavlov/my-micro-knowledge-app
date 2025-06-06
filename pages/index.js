@@ -1,86 +1,190 @@
 // pages/index.js
 // Esta es la página principal de nuestra aplicación.
-// Ahora incluye la lógica para interactuar con Supabase para crear y listar notas.
+// Ahora incluye la lógica para interactuar con Supabase para crear, listar, editar y eliminar notas.
 
 import Head from 'next/head';
-import { createClient } from '@supabase/supabase-js'; // Importa el cliente de Supabase
-import { useState, useEffect } from 'react'; // Importa hooks de React para estado y efectos
+import { createClient } from '@supabase/supabase-js';
+import { useState, useEffect } from 'react';
 
 // Inicializa el cliente Supabase utilizando las variables de entorno configuradas en Vercel.
-// Las variables NEXT_PUBLIC_ son accesibles en el código del lado del cliente.
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function Home() {
-  const [notes, setNotes] = useState([]); // Estado para almacenar la lista de notas.
-  const [newNoteTitle, setNewNoteTitle] = useState(''); // Estado para el título de la nueva nota.
-  const [newNoteContent, setNewNoteContent] = useState(''); // Estado para el contenido de la nueva nota.
-  const [loading, setLoading] = useState(true); // Estado para indicar si la carga o guardado está en progreso.
-  const [error, setError] = useState(null); // Estado para manejar mensajes de error.
+  const [notes, setNotes] = useState([]);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState(null); // ID de la nota que se está editando.
+  const [editingTitle, setEditingTitle] = useState(''); // Título temporal para la edición.
+  const [editingContent, setEditingContent] = useState(''); // Contenido temporal para la edición.
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false); // Para el modal de confirmación de eliminación.
+  const [noteToDeleteId, setNoteToDeleteId] = useState(null); // ID de la nota a eliminar.
 
-  // Función asíncrona para obtener las notas de Supabase.
+  // Función para obtener las notas de Supabase
   const fetchNotes = async () => {
     try {
-      setLoading(true); // Activa el estado de carga.
-      setError(null); // Limpia errores previos antes de una nueva operación.
-
-      // Consulta la tabla 'notes' en Supabase, selecciona todas las columnas y las ordena por fecha de creación.
+      setLoading(true);
+      setError(null);
       const { data, error } = await supabase
         .from('notes')
         .select('id, title, content, created_at, is_public')
-        .order('created_at', { ascending: false }); // Ordena de la más nueva a la más antigua.
+        .order('created_at', { ascending: false });
 
       if (error) {
-        throw error; // Lanza un error si la consulta falla.
+        throw error;
       }
-      setNotes(data); // Actualiza el estado con las notas obtenidas.
+      setNotes(data);
     } catch (err) {
       console.error('Error al obtener notas:', err.message);
-      setError('Error al cargar las notas: ' + err.message); // Muestra un mensaje de error al usuario.
+      setError('Error al cargar las notas: ' + err.message);
     } finally {
-      setLoading(false); // Desactiva el estado de carga.
+      setLoading(false);
     }
   };
 
-  // Función asíncrona para añadir una nueva nota a Supabase.
+  // Función para añadir una nueva nota a Supabase
   const addNote = async (e) => {
-    e.preventDefault(); // Evita que el formulario recargue la página.
-    if (!newNoteTitle.trim()) { // Valida que el título no esté vacío.
+    e.preventDefault();
+    if (!newNoteTitle.trim()) {
       setError('El título de la nota no puede estar vacío.');
       return;
     }
 
     try {
-      setLoading(true); // Activa el estado de carga.
-      setError(null); // Limpia errores previos.
-
-      // Inserta una nueva fila en la tabla 'notes'.
-      // 'content' puede ser nulo si el usuario no lo proporciona.
+      setLoading(true);
+      setError(null);
       const { data, error } = await supabase
         .from('notes')
-        .insert([
-          { title: newNoteTitle.trim(), content: newNoteContent.trim() || null, is_public: false }
-        ])
-        .select(); // Con .select() obtenemos el registro insertado de vuelta.
+        .insert([{ title: newNoteTitle.trim(), content: newNoteContent.trim() || null, is_public: false }])
+        .select();
 
       if (error) {
-        throw error; // Lanza un error si la inserción falla.
+        throw error;
       }
-      // Actualiza la lista de notas añadiendo la nueva nota al principio.
       setNotes((prevNotes) => [data[0], ...prevNotes]);
-      setNewNoteTitle(''); // Limpia el campo del título.
-      setNewNoteContent(''); // Limpia el campo del contenido.
+      setNewNoteTitle('');
+      setNewNoteContent('');
     } catch (err) {
       console.error('Error al añadir nota:', err.message);
-      setError('Error al guardar la nota: ' + err.message); // Muestra un mensaje de error al usuario.
+      setError('Error al guardar la nota: ' + err.message);
     } finally {
-      setLoading(false); // Desactiva el estado de carga.
+      setLoading(false);
     }
   };
 
-  // useEffect para cargar las notas cuando el componente se monta por primera vez.
-  // El array de dependencias vacío [] asegura que se ejecute solo una vez.
+  // Inicia el modo de edición para una nota específica.
+  const startEditing = (note) => {
+    setEditingNoteId(note.id);
+    setEditingTitle(note.title);
+    setEditingContent(note.content || '');
+  };
+
+  // Guarda los cambios de una nota editada.
+  const saveEditedNote = async (e) => {
+    e.preventDefault();
+    if (!editingTitle.trim()) {
+      setError('El título de la nota no puede estar vacío.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const { data, error } = await supabase
+        .from('notes')
+        .update({ title: editingTitle.trim(), content: editingContent.trim() || null })
+        .eq('id', editingNoteId) // Condición: actualizar donde el ID coincide.
+        .select();
+
+      if (error) {
+        throw error;
+      }
+      // Actualiza la lista de notas en el estado local.
+      setNotes((prevNotes) =>
+        prevNotes.map((note) => (note.id === editingNoteId ? data[0] : note))
+      );
+      setEditingNoteId(null); // Sale del modo de edición.
+      setEditingTitle('');
+      setEditingContent('');
+    } catch (err) {
+      console.error('Error al guardar edición:', err.message);
+      setError('Error al actualizar la nota: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cancela el modo de edición.
+  const cancelEditing = () => {
+    setEditingNoteId(null);
+    setEditingTitle('');
+    setEditingContent('');
+    setError(null);
+  };
+
+  // Abre el modal de confirmación para eliminar.
+  const confirmDelete = (id) => {
+    setNoteToDeleteId(id);
+    setShowConfirmModal(true);
+  };
+
+  // Elimina una nota de Supabase.
+  const deleteNote = async () => {
+    if (!noteToDeleteId) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      const { error } = await supabase
+        .from('notes')
+        .delete()
+        .eq('id', noteToDeleteId); // Condición: eliminar donde el ID coincide.
+
+      if (error) {
+        throw error;
+      }
+      // Actualiza la lista de notas en el estado local, filtrando la nota eliminada.
+      setNotes((prevNotes) => prevNotes.filter((note) => note.id !== noteToDeleteId));
+      setShowConfirmModal(false); // Cierra el modal.
+      setNoteToDeleteId(null); // Limpia el ID de la nota a eliminar.
+    } catch (err) {
+      console.error('Error al eliminar nota:', err.message);
+      setError('Error al eliminar la nota: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cambia el estado 'is_public' de una nota.
+  const togglePublicStatus = async (id, currentStatus) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { data, error } = await supabase
+        .from('notes')
+        .update({ is_public: !currentStatus }) // Invierte el estado actual.
+        .eq('id', id)
+        .select();
+
+      if (error) {
+        throw error;
+      }
+      // Actualiza la lista de notas en el estado local.
+      setNotes((prevNotes) =>
+        prevNotes.map((note) => (note.id === id ? data[0] : note))
+      );
+    } catch (err) {
+      console.error('Error al cambiar estado público:', err.message);
+      setError('Error al cambiar el estado de publicación: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cargar notas al montar el componente.
   useEffect(() => {
     fetchNotes();
   }, []);
@@ -104,7 +208,7 @@ export default function Home() {
 
       <main style={{
         width: '100%',
-        maxWidth: '800px', // Limita el ancho máximo del contenido para mejor legibilidad.
+        maxWidth: '800px',
         padding: '2rem',
         borderRadius: '10px',
         backgroundColor: '#ffffff',
@@ -130,7 +234,7 @@ export default function Home() {
                 borderRadius: '5px',
                 fontSize: '1rem'
               }}
-              disabled={loading} // Deshabilita el input mientras se guarda.
+              disabled={loading || editingNoteId !== null} // Deshabilitar si carga o edita.
             />
             <textarea
               placeholder="Contenido de la nota (opcional)"
@@ -142,9 +246,9 @@ export default function Home() {
                 border: '1px solid #ddd',
                 borderRadius: '5px',
                 fontSize: '1rem',
-                resize: 'vertical' // Permite al usuario redimensionar verticalmente.
+                resize: 'vertical'
               }}
-              disabled={loading} // Deshabilita el textarea mientras se guarda.
+              disabled={loading || editingNoteId !== null} // Deshabilitar si carga o edita.
             ></textarea>
             <button
               type="submit"
@@ -156,12 +260,12 @@ export default function Home() {
                 borderRadius: '5px',
                 fontSize: '1.1rem',
                 cursor: 'pointer',
-                transition: 'background-color 0.3s ease', // Transición suave al pasar el ratón.
+                transition: 'background-color 0.3s ease',
                 fontWeight: 'bold'
               }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#0056b3'} // Efecto hover.
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#0070f3'} // Vuelve al color original.
-              disabled={loading} // Deshabilita el botón mientras se guarda.
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#0056b3'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#0070f3'}
+              disabled={loading || editingNoteId !== null} // Deshabilitar si carga o edita.
             >
               {loading ? 'Guardando...' : 'Guardar Nota Esencial'}
             </button>
@@ -172,9 +276,9 @@ export default function Home() {
         {/* Sección para Listar Notas */}
         <section>
           <h2 style={{ color: '#333', marginBottom: '1.5rem', textAlign: 'center' }}>Mis Notas Esenciales</h2>
-          {loading && notes.length === 0 ? ( // Muestra "Cargando" solo si no hay notas aún.
+          {loading && notes.length === 0 ? (
             <p style={{ textAlign: 'center' }}>Cargando notas...</p>
-          ) : notes.length === 0 ? ( // Muestra mensaje si no hay notas después de cargar.
+          ) : notes.length === 0 ? (
             <p style={{ textAlign: 'center', fontStyle: 'italic', color: '#666' }}>Aún no hay notas. ¡Crea tu primera!</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -185,32 +289,222 @@ export default function Home() {
                   padding: '1.5rem',
                   backgroundColor: '#fdfdfd',
                   boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-                  transition: 'transform 0.2s ease', // Efecto suave al pasar el ratón.
+                  transition: 'transform 0.2s ease',
                   cursor: 'default'
                 }}
                 onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
                 onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                 >
-                  <h3 style={{ color: '#0070f3', marginBottom: '0.5rem', fontSize: '1.4rem' }}>{note.title}</h3>
-                  {note.content && ( // Muestra el contenido solo si existe.
-                    <p style={{ fontSize: '1rem', lineHeight: '1.5', color: '#555' }}>
-                      {/* Trunca el contenido si es muy largo para la vista previa. */}
-                      {note.content.length > 200 ? note.content.substring(0, 200) + '...' : note.content}
-                    </p>
+                  {editingNoteId === note.id ? (
+                    // Modo de edición para la nota
+                    <form onSubmit={saveEditedNote} style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        style={{
+                          padding: '0.6rem',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          fontSize: '1.2rem',
+                          fontWeight: 'bold'
+                        }}
+                        disabled={loading}
+                      />
+                      <textarea
+                        value={editingContent}
+                        onChange={(e) => setEditingContent(e.target.value)}
+                        rows="4"
+                        style={{
+                          padding: '0.6rem',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          fontSize: '0.95rem',
+                          resize: 'vertical'
+                        }}
+                        disabled={loading}
+                      ></textarea>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem' }}>
+                        <button
+                          type="submit"
+                          style={{
+                            flex: 1,
+                            padding: '0.7rem 1rem',
+                            backgroundColor: '#28a745', // Verde para guardar.
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.3s ease',
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#218838'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#28a745'}
+                          disabled={loading}
+                        >
+                          Guardar Cambios
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEditing}
+                          style={{
+                            flex: 1,
+                            padding: '0.7rem 1rem',
+                            backgroundColor: '#6c757d', // Gris para cancelar.
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.3s ease',
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#5a6268'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#6c757d'}
+                          disabled={loading}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    // Modo de visualización para la nota
+                    <>
+                      <h3 style={{ color: '#0070f3', marginBottom: '0.5rem', fontSize: '1.4rem' }}>{note.title}</h3>
+                      {note.content && (
+                        <p style={{ fontSize: '1rem', lineHeight: '1.5', color: '#555' }}>
+                          {note.content}
+                        </p>
+                      )}
+                      <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '1rem' }}>
+                        Creada el: {new Date(note.created_at).toLocaleDateString()}
+                      </p>
+                      <p style={{ fontSize: '0.85rem', color: '#888' }}>
+                        Pública: {note.is_public ? 'Sí' : 'No'}
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                        <button
+                          onClick={() => startEditing(note)}
+                          style={{
+                            padding: '0.6rem 1rem',
+                            backgroundColor: '#ffc107', // Amarillo para editar.
+                            color: '#333',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.3s ease',
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#e0a800'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#ffc107'}
+                          disabled={loading}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => confirmDelete(note.id)}
+                          style={{
+                            padding: '0.6rem 1rem',
+                            backgroundColor: '#dc3545', // Rojo para eliminar.
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.3s ease',
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#c82333'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#dc3545'}
+                          disabled={loading}
+                        >
+                          Eliminar
+                        </button>
+                        <button
+                          onClick={() => togglePublicStatus(note.id, note.is_public)}
+                          style={{
+                            padding: '0.6rem 1rem',
+                            backgroundColor: note.is_public ? '#17a2b8' : '#6f42c1', // Azul/Púrpura para público/privado.
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.3s ease',
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = note.is_public ? '#138496' : '#5a2d9b'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = note.is_public ? '#17a2b8' : '#6f42c1'}
+                          disabled={loading}
+                        >
+                          {note.is_public ? 'Hacer Privada' : 'Hacer Pública'}
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '1rem' }}>
-                    Creada el: {new Date(note.created_at).toLocaleDateString()}
-                  </p>
-                  <p style={{ fontSize: '0.85rem', color: '#888' }}>
-                    Pública: {note.is_public ? 'Sí' : 'No'}
-                  </p>
-                  {/* Más adelante, añadiremos botones de editar/borrar/publicar */}
                 </div>
               ))}
             </div>
           )}
         </section>
       </main>
+
+      {/* Modal de confirmación de eliminación */}
+      {showConfirmModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            padding: '2rem',
+            borderRadius: '10px',
+            boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+            maxWidth: '400px',
+            width: '90%'
+          }}>
+            <h3 style={{ color: '#dc3545', marginBottom: '1.5rem' }}>Confirmar Eliminación</h3>
+            <p style={{ marginBottom: '2rem' }}>¿Estás seguro de que quieres eliminar esta nota?</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
+              <button
+                onClick={deleteNote}
+                style={{
+                  padding: '0.8rem 1.5rem',
+                  backgroundColor: '#dc3545',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.3s ease',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#c82333'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#dc3545'}
+                disabled={loading}
+              >
+                Sí, Eliminar
+              </button>
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                style={{
+                  padding: '0.8rem 1.5rem',
+                  backgroundColor: '#6c757d',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.3s ease',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#5a6268'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#6c757d'}
+                disabled={loading}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer style={{ marginTop: '2rem', fontSize: '0.9rem', color: '#666', textAlign: 'center' }}>
         Desarrollado con inspiración por tu IA. La belleza en la sencillez.
